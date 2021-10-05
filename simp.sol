@@ -680,8 +680,12 @@ interface IDistributor {
 }
 
 
-contract TEST is Context, Ownable, ReentrancyGuard, EIP712Domain {
+contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     using Address for address;
+    
+    string private _name = "SIMP Token";
+    string private _symbol = "SIMP";
+    uint8 private _decimals = 6;
 
     // From EIP3009
     bytes32 public constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH =
@@ -714,14 +718,10 @@ contract TEST is Context, Ownable, ReentrancyGuard, EIP712Domain {
     address public marketingWallet;
     address public liquidityWallet;
 
-    uint256 private constant MAX = ~uint256(0);
-    uint256 private _tTotal = 10e11 * 10e5; // 1 trillion units with 6 decimal units each
+    uint256 private constant MAX = type(uint256).max;
+    uint256 private _tTotal = 10e11 * (10 ** _decimals); // 1 trillion units with 6 decimal units each
     uint256 private _rTotal = (MAX - (MAX % _tTotal));
     uint256 private _tFeeTotal;
-
-    string private _name = "TEST Token";
-    string private _symbol = "TEST";
-    uint8 private _decimals = 6;
 
     address public burnAddress = 0x000000000000000000000000000000000000dEaD;
     mapping (address => bool) public liquidityPools;
@@ -794,8 +794,8 @@ contract TEST is Context, Ownable, ReentrancyGuard, EIP712Domain {
         _tOwned[msg.sender] = _tTotal;
         _rOwned[msg.sender] = _rTotal;
 
-        address routerAddress = 0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3;
-        //address routerAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
+        //address routerAddress = 0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3; //testnet
+        address routerAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E; //mainnet
         IPancakeRouter02 pancakeRouter = IPancakeRouter02(routerAddress);
         // Create a pancake pair for this new token
         address pancakePair = IPancakeFactory(pancakeRouter.factory()).createPair(

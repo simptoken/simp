@@ -680,11 +680,11 @@ interface IDistributor {
 }
 
 
-contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
+contract TEST is Context, Ownable, ReentrancyGuard, EIP712Domain {
     using Address for address;
     
-    string private _name = "SIMP Token";
-    string private _symbol = "SIMP";
+    string private _name = "TEST Token";
+    string private _symbol = "TEST";
     uint8 private _decimals = 6;
 
     // From EIP3009
@@ -719,7 +719,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     address public liquidityWallet;
 
     uint256 private constant MAX = type(uint256).max;
-    uint256 private _tTotal = 10e11 * (10 ** _decimals); // 1 trillion units with 6 decimal units each
+    uint256 private _tTotal = 1_000_000_000_000 * (10 ** _decimals); // 1 trillion units with 6 decimal units each
     uint256 private _rTotal = (MAX - (MAX % _tTotal));
     uint256 private _tFeeTotal;
 
@@ -734,11 +734,11 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     uint256 public lastSnipeTaxBlock; // set to blocks after liq added
     uint256 public snipeBlocks;
     uint256 public endSnipeLimitPeriod; // 2 mins + (big tax blocks) * 3 seconds, after liquidity added
-    uint256 private maxAntiSnipeTxSize = 500000000000000; // Max transfer per tx in anti snipe period (in SIMP) (<- 500 mil SIMP)
+    uint256 private maxAntiSnipeTxSize = 500_000_000 * (10 ** _decimals); // Max transfer per tx in anti snipe period (in SIMP) (<- 500 mil SIMP)
     mapping(address => uint256) private lastTransferTimes; // tracks when last user transfered for anti snipe
     
     bool public swapAndLiquifyEnabled = false; // should be true
-    bool public inSwap;
+    bool public inSwap = false;
 
     // Tokenomics:
     // 3.5% BNB rewards
@@ -758,7 +758,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     uint256 public _liquidityFee = 70; // over 1000 --> 7%
     uint256 private _previousLiquidityFee = _liquidityFee; //_liquidityFee is also the 7% of fee that will be swapped to BNB in swapAndLiquify
 
-    uint256 minTokenNumberToSell = _tTotal / 10000; // 0.01% max tx amount will trigger swap and add liquidity
+    uint256 public minTokenNumberToSell = _tTotal / 10000; // 0.01% max tx amount will trigger swap and add liquidity
 
 
     event Transfer(address indexed from, address indexed to, uint256 value);
@@ -794,8 +794,8 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         _tOwned[msg.sender] = _tTotal;
         _rOwned[msg.sender] = _rTotal;
 
-        //address routerAddress = 0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3; //testnet
-        address routerAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E; //mainnet
+        address routerAddress = 0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3;
+        //address routerAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
         IPancakeRouter02 pancakeRouter = IPancakeRouter02(routerAddress);
         // Create a pancake pair for this new token
         address pancakePair = IPancakeFactory(pancakeRouter.factory()).createPair(
@@ -1239,7 +1239,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         
 
         // swap and liquify
-        swapAndLiquify(from, to);
+        if (shouldSwap(to)) swapAndLiquify(to);
 
         //indicates if fee should be deducted from transfer
         bool takeFee = true;
@@ -1317,70 +1317,63 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
             distributor.getClaimTime(msg.sender)
         );
     }
-
-    function swapAndLiquify(address from, address to) private swapping {
-        // is the token balance of this contract address over the min number of
-        // tokens that we need to initiate a swap + liquidity lock?
-        // also, don't get caught in a circular liquidity event.
-        // also, don't swap & liquify if sender is pancake pair.
-        uint256 contractTokenBalance = balanceOf(address(this));
-
-        if (
+    
+    function shouldSwap(address to) internal view returns(bool) {
+        return 
             !inSwap &&
             swapAndLiquifyEnabled &&
-            contractTokenBalance >= minTokenNumberToSell &&
-            !liquidityPools[from] &&
-            liquidityPools[to]
-        ) {
-            // only sell for minTokenNumberToSell, decouple from _maxTxAmount
-            contractTokenBalance = minTokenNumberToSell;
+            balanceOf(address(this)) >= minTokenNumberToSell &&
+            !liquidityPools[msg.sender] &&
+            liquidityPools[to];
+    }
 
-            // add liquidity
-            uint256 totalFee = _taxFee + _liquidityFee; //1.5% + 7% = 8.5% => 85 (over 1000)
+    function swapAndLiquify(address to) internal swapping {
+        // only sell for minTokenNumberToSell, decouple from _maxTxAmount
+        uint256 amountToSwap = minTokenNumberToSell;
 
-            // Tax vars
-            uint256 totalSwappedToBNB = (contractTokenBalance * _liquidityFee) / totalFee; // 70 / 85
-            //uint256 totalLeftInSIMP = contractTokenBalance.mul(_taxFee).div(
-            //    totalFee
-            //); // 15 / 85
-            uint256 simpForLP = (contractTokenBalance * (totalFeesToLP / 2)) / totalFee; // (10/2) / 85 => 5 / 85
+        // add liquidity
+        uint256 totalFee = _taxFee + _liquidityFee; //1.5% + 7% = 8.5% => 85 (over 1000)
 
-            uint256 initialBalance = address(this).balance;
+        // Tax vars
+        uint256 totalSwappedToBNB = (amountToSwap * _liquidityFee) / totalFee; // 70 / 85
 
-            // now is to lock into staking pool
-            swapTokensForEth(
-                to,
-                totalSwappedToBNB // 7% of the 8.5% SIMP tax swapped to BNB
-            );
+        uint256 simpForLP = (amountToSwap * (totalFeesToLP / 2)) / totalFee; // (10/2) / 85 => 5 / 85
 
-            // how much BNB did we just swap into?
+        uint256 initialBalance = address(this).balance;
 
-            // capture the contract's current BNB balance.
-            // this is so that we can capture exactly the amount of BNB that the
-            // swap creates, and not make the liquidity event include any BNB that
-            // has been manually sent to the contract
-            uint256 deltaBalance = address(this).balance - initialBalance;
+        // now is to lock into staking pool
+        swapTokensForEth(
+            to,
+            totalSwappedToBNB // 7% of the 8.5% SIMP tax swapped to BNB
+        );
 
-            // Allocating 0.5% of the 7% in BNB to the BNB side of LP
-            uint256 bnbToBeAddedToLiquidity = (deltaBalance * (totalFeesToLP / 2)) / _liquidityFee; // 0.5% / 7%
+        // how much BNB did we just swap into?
 
-            // Sending marketing wallet it's 3% share of taxes in BNB
-            // 3% / 7% = 30 / 70
-            payable(marketingWallet).transfer((deltaBalance * totalFeesToMarketing) / _liquidityFee);
-            // BNB leftover at this point = 7% - (0.5% + 3%) = 3.5% => claimable as BNB rewards for SIMP holders
-            
-            // add liquidity to pancake
-            addLiquidity(
-                to,
-                liquidityWallet,
-                simpForLP,
-                bnbToBeAddedToLiquidity
-            );
+        // capture the contract's current BNB balance.
+        // this is so that we can capture exactly the amount of BNB that the
+        // swap creates, and not make the liquidity event include any BNB that
+        // has been manually sent to the contract
+        uint256 deltaBalance = address(this).balance - initialBalance;
 
-            try distributor.deposit{value: address(this).balance}() {} catch {}
-            
-            emit SwapAndLiquify(totalSwappedToBNB, deltaBalance, simpForLP);
-        }
+        // Allocating 0.5% of the 7% in BNB to the BNB side of LP
+        uint256 bnbToBeAddedToLiquidity = (deltaBalance * (totalFeesToLP / 2)) / _liquidityFee; // 0.5% / 7%
+
+        // Sending marketing wallet it's 3% share of taxes in BNB
+        // 3% / 7% = 30 / 70
+        payable(marketingWallet).transfer((deltaBalance * totalFeesToMarketing) / _liquidityFee);
+        // BNB leftover at this point = 7% - (0.5% + 3%) = 3.5% => claimable as BNB rewards for SIMP holders
+        
+        // add liquidity to pancake
+        addLiquidity(
+            to,
+            liquidityWallet,
+            simpForLP,
+            bnbToBeAddedToLiquidity
+        );
+
+        try distributor.deposit{value: address(this).balance}() {} catch {}
+        
+        emit SwapAndLiquify(totalSwappedToBNB, deltaBalance, simpForLP);
     }
 
     function swapTokensForEth(

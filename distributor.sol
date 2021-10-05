@@ -223,6 +223,7 @@ interface IERC20 {
 }
 
 interface IDistributor {
+    function finishDistribution() external;
     function startDistribution() external;
     function setDistributionParameters(uint256 _minPeriod, uint256 _minDistribution, uint256 _gas) external;
     function setShares(address shareholder, uint256 amount) external;
@@ -259,14 +260,14 @@ contract Distributor is IDistributor {
     uint256 public rewardsPerShare;
     uint256 public rewardsPerShareAccuracyFactor = 10 ** 36;
 
-    uint256 public minPeriod = 24 hours;
+    uint256 public minPeriod = 7 days;
     uint256 public minDistribution = 1 * (10 ** 15);
     uint256 public gas = 150000;
     
     uint256 currentIndex;
-    Distributor previous;
 
     bool public initialized;
+    uint256 newBalance = 0;
     modifier initialization() {
         require(!initialized);
         _;
@@ -279,18 +280,16 @@ contract Distributor is IDistributor {
 
     constructor (address _mainContract) {
         mainContract[_mainContract] = true;
-        mainContract[msg.sender] = true;
     }
     
     function finishDistribution() external onlyMain {
         initialized = false;
+        newBalance = 0;
     }
     
     function startDistribution() external override initialization onlyMain {
-        uint256 amount =  address(this).balance;
-
-        totalRewards += amount;
-        rewardsPerShare += ((rewardsPerShareAccuracyFactor * amount) / totalShares);
+        totalRewards += newBalance;
+        rewardsPerShare += ((rewardsPerShareAccuracyFactor * newBalance) / totalShares);
     }
     
     function migrate(address _distributor) external override onlyMain {
@@ -335,7 +334,10 @@ contract Distributor is IDistributor {
     }
 
     function deposit() external payable override {
-        if(!initialized) return;
+        if(!initialized) {
+            newBalance += msg.value;
+            return;
+        }
 
         uint256 amount = msg.value;
 

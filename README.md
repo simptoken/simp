@@ -1,2 +1,2 @@
-# simp
-Code repository for SIMP
+# SIMP
+Code repository for SIMP Token

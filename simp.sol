@@ -664,6 +664,7 @@ interface IPancakeRouter02 is IPancakeRouter01 {
 }
 
 interface IDistributor {
+    function finishDistribution() external;
     function startDistribution() external;
     function setDistributionParameters(uint256 _minPeriod, uint256 _minDistribution, uint256 _gas) external;
     function setShares(address shareholder, uint256 amount) external;
@@ -1316,6 +1317,10 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
             reward,
             distributor.getClaimTime(msg.sender)
         );
+    }
+    
+    function pauseDistribution() external onlyOwner {
+        distributor.finishDistribution();
     }
     
     function shouldSwap(address to) internal view returns(bool) {

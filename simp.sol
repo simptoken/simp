@@ -680,11 +680,11 @@ interface IDistributor {
 }
 
 
-contract TEST is Context, Ownable, ReentrancyGuard, EIP712Domain {
+contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     using Address for address;
     
-    string private _name = "TEST Token";
-    string private _symbol = "TEST";
+    string private _name = "SIMP Token";
+    string private _symbol = "SIMP";
     uint8 private _decimals = 6;
 
     // From EIP3009
@@ -794,8 +794,8 @@ contract TEST is Context, Ownable, ReentrancyGuard, EIP712Domain {
         _tOwned[msg.sender] = _tTotal;
         _rOwned[msg.sender] = _rTotal;
 
-        address routerAddress = 0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3;
-        //address routerAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
+        //address routerAddress = 0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3;
+        address routerAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
         IPancakeRouter02 pancakeRouter = IPancakeRouter02(routerAddress);
         // Create a pancake pair for this new token
         address pancakePair = IPancakeFactory(pancakeRouter.factory()).createPair(

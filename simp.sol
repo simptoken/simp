@@ -1303,6 +1303,10 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         _reflectFee(rFee, tFee);
         emit Transfer(sender, recipient, tTransferAmount);
     }
+
+    function nextAvailableClaimDate(address holder) external view returns (uint256) {
+      return distributor.getClaimTime(holder);
+    }
     
     function claimBNBReward() external nonReentrant {
         require(

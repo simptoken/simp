@@ -7,7 +7,7 @@ Code repository for SIMP Token
 
 ## Socials
 
-Website: [https://letsallsimp.com/](https://letsallsimp.com/)
-Telegram: [https://t.me/letsallsimp](https://t.me/letsallsimp)
-Instagram: [https://instagram.com/letsallsimp](https://instagram.com/letsallsimp)
-Instagram: [https://twitter.com/letsallsimp](https://twitter.com/letsallsimp)
+Website: [https://letsallsimp.com/](https://letsallsimp.com/)  
+Telegram: [https://t.me/letsallsimp](https://t.me/letsallsimp)  
+Instagram: [https://instagram.com/letsallsimp](https://instagram.com/letsallsimp)  
+Instagram: [https://twitter.com/letsallsimp](https://twitter.com/letsallsimp)  

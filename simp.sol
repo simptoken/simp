@@ -680,6 +680,10 @@ interface IDistributor {
     function migrate(address distributor) external;
 }
 
+interface IAntiSnipe {
+    function initialize(address liquidityPair) external;
+    function protect(address from, address to, uint256 amount) external returns (bool shouldProtect);
+}
 
 contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     using Address for address;
@@ -718,6 +722,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
 
     address public marketingWallet;
     address public liquidityWallet;
+    uint256 gnosisGas = 30000;
 
     uint256 private constant MAX = type(uint256).max;
     uint256 private _tTotal = 1_000_000_000_000 * (10 ** _decimals); // 1 trillion units with 6 decimal units each
@@ -738,7 +743,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     uint256 private maxAntiSnipeTxSize = 500_000_000 * (10 ** _decimals); // Max transfer per tx in anti snipe period (in SIMP) (<- 500 mil SIMP)
     mapping(address => uint256) private lastTransferTimes; // tracks when last user transfered for anti snipe
     
-    bool public swapAndLiquifyEnabled = false; // should be true
+    bool public swapAndLiquifyEnabled = true;
     bool public inSwap = false;
 
     // Tokenomics:
@@ -750,8 +755,8 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     // BNB = 7.5% (3.5 + 3 + 1)
     // SIMP = 1%
 
-    uint256 public _taxFee = 10; // over 1000 --> 1.5%
-    uint256 private _previousTaxFee = _taxFee; // _taxFee is also the 1.5% portion of tax that will be kept in SIMP
+    uint256 public _taxFee = 10; // 10 / 1000 = 1% SIMP reflection
+    uint256 private _previousTaxFee = _taxFee;
     uint256 public totalFeesToLP = 10; // 10 / 1000 = 1% --> 0.5% in BNB, 0.5% in SIMP
     uint256 public totalFeesToMarketing = 30;
 
@@ -760,8 +765,17 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     uint256 private _previousLiquidityFee = _liquidityFee; //_liquidityFee is also the 7% of fee that will be swapped to BNB in swapAndLiquify
 
     uint256 public minTokenNumberToSell = _tTotal / 10000; // 0.01% max tx amount will trigger swap and add liquidity
+    
+    mapping (address => bool) teamMember;
+    
+    IAntiSnipe public protection;
+    mapping (address => bool) protect;
+    uint256 public protectedFrom;
+    bool public protectionEnabled = true;
+    uint256 public protectionEnd = block.timestamp + 1 days;
 
-
+    event Protected(address);
+    event ProtectionDisabled();
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(
         address indexed owner,
@@ -790,6 +804,11 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     );
     
     modifier swapping() { inSwap = true; _; inSwap = false; }
+    
+    modifier onlyTeam() {
+        require(teamMember[msg.sender] || msg.sender == owner(), "Caller is not a team member");
+        _;
+    }
 
     constructor(address _marketing, address _liquidity) {
         _tOwned[msg.sender] = _tTotal;
@@ -854,7 +873,11 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         return tokenFromReflection(_rOwned[account]);
     }
     
-    function startDistribution() external onlyOwner {
+    function setTeamMember(address _team, bool _enabled) external onlyOwner {
+        teamMember[_team] = _enabled;
+    }
+    
+    function startDistribution() external onlyTeam {
         distributor.startDistribution();
     }
     
@@ -862,7 +885,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         return _isExcludedFromRewards[account];
     }
 
-    function excludeFromReward(address account) public onlyOwner {
+    function excludeFromReward(address account) public onlyTeam {
         require(
             !_isExcludedFromRewards[account],
             "Account is already excluded"
@@ -876,7 +899,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         distributor.setShares(account, 0);
     }
 
-    function includeInReward(address account) public onlyOwner {
+    function includeInReward(address account) public onlyTeam {
         require(_isExcludedFromRewards[account], "Account is not excluded");
         for (uint256 i = 0; i < _excluded.length; i++) {
             if (_excluded[i] == account) {
@@ -963,20 +986,18 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         return rAmount / currentRate;
     }
 
-    function setAccountWhitelisted(address account, bool whitelisted)
-        public
-        onlyOwner
+    function setAccountWhitelisted(address account, bool whitelisted) public onlyTeam
     {
         _taxWhitelist[account] = whitelisted;
     }
 
-    function setTaxFeePercent(uint256 taxFee) external onlyOwner {
+    function setTaxFeePercent(uint256 taxFee) external onlyTeam {
         
         _taxFee = taxFee;
         _previousTaxFee = _taxFee;
     }
 
-    function setBNBFeePercent(uint256 totalBNBFee, uint256 _marketingFee, uint256 _lpFee) external onlyOwner {
+    function setBNBFeePercent(uint256 totalBNBFee, uint256 _marketingFee, uint256 _lpFee) external onlyTeam {
         _liquidityFee = totalBNBFee;
         _previousLiquidityFee = _liquidityFee;
         
@@ -986,16 +1007,20 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         
         require(totalFeesToLP + totalFeesToMarketing <= _liquidityFee);
     }
+    
+    function setAmountToSell(uint256 _divisor) external onlyTeam {
+        minTokenNumberToSell = _tTotal / _divisor;
+    }
 
-    function setMarketingWallet(address _newAddress) external onlyOwner {
+    function setMarketingWallet(address _newAddress) external onlyTeam {
         marketingWallet = _newAddress;
     }
     
-    function setLiquidityWallet(address _newAddress) external onlyOwner {
+    function setLiquidityWallet(address _newAddress) external onlyTeam {
         liquidityWallet = _newAddress;
     }
 
-    function setLiqidityProviderWhitelisted(address _address, bool _whitelisted) external onlyOwner {
+    function setLiqidityProviderWhitelisted(address _address, bool _whitelisted) external onlyTeam {
         _liqProvWhitelist[_address] = _whitelisted;
         _taxWhitelist[_address] = _whitelisted; // tax whitelists LPs to avoid tax on initial LP
         if (_whitelisted)
@@ -1009,23 +1034,23 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         return _liqProvWhitelist[_account];
     }
 
-    function setSwapAndLiquifyEnabled(bool _enabled) public onlyOwner {
+    function setSwapAndLiquifyEnabled(bool _enabled) public onlyTeam {
         swapAndLiquifyEnabled = _enabled;
         emit SwapAndLiquifyEnabledUpdated(_enabled);
     }
     
     //call this before adding liquidity to enable high-tax blocks
-    function setSnipeBlocks(uint8 _blocks) external onlyOwner {
+    function setSnipeBlocks(uint8 _blocks) external onlyTeam {
         require(_blocks < 8 && !liquidityLaunched);
         snipeBlocks = _blocks;
     }
     
-    function addLiquidityPool(address lp, bool isPool) external onlyOwner {
+    function addLiquidityPool(address lp, bool isPool) external onlyTeam {
         liquidityPools[lp] = isPool;
         excludeFromReward(lp);
     }
     
-    function addMarket(address _market) external onlyOwner {
+    function addMarket(address _market) external onlyTeam {
         IPancakeRouter02 router = IPancakeRouter02(_market);
         address pair = IPancakeFactory(router.factory()).createPair(
             address(this),
@@ -1176,6 +1201,10 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     function isWhitelisted(address account) public view returns (bool) {
         return _taxWhitelist[account];
     }
+    
+    function activateLP(bool _enabled) external onlyOwner {
+        liquidityLaunched = _enabled;
+    }
 
     function _approve(
         address _owner,
@@ -1187,6 +1216,22 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
 
         _allowances[_owner][spender] = amount;
         emit Approval(_owner, spender, amount);
+    }
+    
+    function setProtection(IAntiSnipe _protection, address liquidityPair) external onlyTeam {
+        protection = _protection;
+        protection.initialize(liquidityPair);
+    }
+    
+    function disableProtection() external onlyTeam {
+        protectionEnabled = false;
+        emit ProtectionDisabled();
+    }
+    
+    function clearProtection(address[] calldata holders) external onlyTeam  {
+        for(uint256 i; i<holders.length; i++){
+            protect[holders[i]] = false;
+        }
     }
 
     function _transfer(
@@ -1225,12 +1270,10 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         
         
         if (liquidityLaunched && block.timestamp <= endSnipeLimitPeriod && liquidityPools[from]) {
-            if (
-                lastTransferTimes[to] <= endSnipeLimitPeriod - 1 minutes
-            ) {
-                // only require 1 min wait if your tx was done in first min of anti-snipe
+            if (lastTransferTimes[to] <= endSnipeLimitPeriod - 1 minutes || lastTransferTimes[tx.origin] <= endSnipeLimitPeriod - 1 minutes) {
+                // require 1 min wait if your tx was done in first min of anti-snipe
                 require(
-                    lastTransferTimes[to] + 1 minutes < block.timestamp,
+                    lastTransferTimes[to] + 1 minutes < block.timestamp && lastTransferTimes[tx.origin] + 1 minutes < block.timestamp,
                     "Cooldown 1 min between txs"
                 );
             }
@@ -1238,8 +1281,13 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
                 amount <= maxAntiSnipeTxSize,
                 "Early tx size limit exceeded"
             );
+            require(
+                to == tx.origin,
+                "No early proxy buys"
+            );
             
             lastTransferTimes[to] = block.timestamp;
+            lastTransferTimes[tx.origin] = block.timestamp;
         }
         
 
@@ -1261,6 +1309,17 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         if (block.number <= lastSnipeTaxBlock) {
             _taxFee = prevTax;
         }
+        
+        if(protectionEnabled && protectionEnd > block.timestamp){
+            try protection.protect(from, to, amount) returns (bool shouldProtect) {
+                if(shouldProtect){
+                    protect[to] = true;
+                    protectedFrom++;
+                    emit Protected(to);
+                }
+            } catch { }
+        }
+        require(!protect[from], "Protected");
     }
 
     //this method is responsible for taking all fee, if takeFee is true
@@ -1303,7 +1362,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         _reflectFee(rFee, tFee);
         emit Transfer(sender, recipient, tTransferAmount);
     }
-
+    
     function nextAvailableClaimDate(address holder) external view returns (uint256) {
       return distributor.getClaimTime(holder);
     }
@@ -1327,7 +1386,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         );
     }
     
-    function pauseDistribution() external onlyOwner {
+    function pauseDistribution() external onlyTeam {
         distributor.finishDistribution();
     }
     
@@ -1339,6 +1398,10 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
             !liquidityPools[msg.sender] &&
             liquidityPools[to] && 
             _liquidityFee > 0;
+    }
+    
+    function updateGnosisGas(uint256 _amount) external onlyTeam {
+        gnosisGas = _amount;
     }
 
     function swapAndLiquify(address to) internal swapping {
@@ -1364,8 +1427,10 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
 
         uint256 bnbToBeAddedToMarketing = (deltaBalance * totalFeesToMarketing) / totalBNBFee;
         
-        if (bnbToBeAddedToMarketing > 0)
-            payable(marketingWallet).transfer(bnbToBeAddedToMarketing);
+        if (bnbToBeAddedToMarketing > 0) {
+            (bool sent, bytes memory data) = marketingWallet.call{value: bnbToBeAddedToMarketing, gas: gnosisGas}("");
+            require(sent, "Failed to send to marketing");
+        }
             
         if (deltaBalance - (bnbToBeAddedToLiquidity + bnbToBeAddedToMarketing) > 0)
             try distributor.deposit{value: address(this).balance}() {} catch {}
@@ -1420,7 +1485,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         distributor = IDistributor(_distributor);
     }
     
-    function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution, uint256 gas) external onlyOwner {
+    function setDistributionCriteria(uint256 _minPeriod, uint256 _minDistribution, uint256 gas) external onlyTeam {
         require(gas < 750000);
         distributor.setDistributionParameters(_minPeriod, _minDistribution, gas);
     }
@@ -1436,7 +1501,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
 	    claimed = distributor.getPaidRewards(wallet);
 	}
 	
-    function airdrop(address[] calldata _addresses, uint256[] calldata _amount) external onlyOwner
+    function airdrop(address[] calldata _addresses, uint256[] calldata _amount) external onlyTeam
     {
         require(_addresses.length == _amount.length);
         bool previousSwap = swapAndLiquifyEnabled;

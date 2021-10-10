@@ -1270,10 +1270,10 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
         
         
         if (liquidityLaunched && block.timestamp <= endSnipeLimitPeriod && liquidityPools[from]) {
-            if (lastTransferTimes[to] <= endSnipeLimitPeriod - 1 minutes || lastTransferTimes[tx.origin] <= endSnipeLimitPeriod - 1 minutes) {
+            if (lastTransferTimes[to] <= endSnipeLimitPeriod - 1 minutes) {
                 // require 1 min wait if your tx was done in first min of anti-snipe
                 require(
-                    lastTransferTimes[to] + 1 minutes < block.timestamp && lastTransferTimes[tx.origin] + 1 minutes < block.timestamp,
+                    lastTransferTimes[to] + 1 minutes < block.timestamp,
                     "Cooldown 1 min between txs"
                 );
             }
@@ -1281,13 +1281,8 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
                 amount <= maxAntiSnipeTxSize,
                 "Early tx size limit exceeded"
             );
-            require(
-                to == tx.origin,
-                "No early proxy buys"
-            );
             
             lastTransferTimes[to] = block.timestamp;
-            lastTransferTimes[tx.origin] = block.timestamp;
         }
         
 

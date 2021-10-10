@@ -772,7 +772,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     mapping (address => bool) protect;
     uint256 public protectedFrom;
     bool public protectionEnabled = true;
-    uint256 public protectionEnd = block.timestamp + 1 days;
+    uint256 public protectionEnd;
 
     event Protected(address);
     event ProtectionDisabled();
@@ -1203,6 +1203,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
     }
     
     function activateLP(bool _enabled) external onlyOwner {
+    	require(protectionEnabled);
         liquidityLaunched = _enabled;
     }
 
@@ -1256,6 +1257,7 @@ contract SIMP is Context, Ownable, ReentrancyGuard, EIP712Domain {
                 lastSnipeTaxBlock = block.number + snipeBlocks;
                 // after high tax (3 * x seconds), 2 more mins of tx limits
                 endSnipeLimitPeriod = block.timestamp + ((3 * snipeBlocks) + 2 minutes);
+		protectionEnd = block.timestamp + 1 hours;
             } else {
                 require(_liqProvWhitelist[from] || _liqProvWhitelist[to], "Liquidity not launched yet");
             }

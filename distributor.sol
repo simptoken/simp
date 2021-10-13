@@ -268,6 +268,11 @@ contract Distributor is IDistributor {
 
     bool public initialized;
     uint256 newBalance = 0;
+    
+    Distributor public previousDistributor = Distributor(payable(0xc9d273D7c3929564329c17806EaC9AFa7a243cc2));
+    mapping (address => bool) public migrated;
+    uint256 updateIndex;
+    
     modifier initialization() {
         require(!initialized);
         _;
@@ -303,8 +308,49 @@ contract Distributor is IDistributor {
         minDistribution = _minDistribution;
         gas = _gas;
     }
+    
+    function updateFromPrevious(uint256 _gas, uint256 shareholderCount) external {
+        uint256 gasUsed = 0;
+        uint256 gasLeft = gasleft();
+
+        uint256 iterations = 0;
+
+        while(gasUsed < _gas && iterations < shareholderCount) {
+            if(updateIndex >= shareholderCount){
+                updateIndex = 0;
+            }
+
+            try previousDistributor.shareholders(updateIndex) returns (address shareholder) {
+                if (!migrated[shareholder]) readInfo(shareholder);
+            } catch {
+                iterations = shareholderCount;
+            }
+
+            gasUsed = gasUsed + (gasLeft - gasleft());
+            gasLeft = gasleft();
+            updateIndex++;
+            iterations++;
+        }
+    }
+    
+    function readInfo(address shareholder) internal {
+        (
+			uint256 amount,
+            uint256 totalExcluded,
+            uint256 totalRealised
+	    ) = previousDistributor.shares(shareholder);
+	    if (amount > 0) {
+            addShareholder(shareholder);
+            shares[shareholder].amount = amount;
+            totalShares += amount;
+            shareholderClaims[shareholder] = previousDistributor.shareholderClaims(shareholder);
+	    }
+        migrated[shareholder] = true;
+    }
 
     function setShares(address shareholder, uint256 amount) external override onlyMain {
+        if (!migrated[shareholder]) readInfo(shareholder);
+        
         uint256 currentAmount = shares[shareholder].amount;
         if(amount > 0 && currentAmount == 0){
             addShareholder(shareholder);
@@ -328,8 +374,10 @@ contract Distributor is IDistributor {
         shares[shareholder].amount = amount;
         
         if(!dist && currentAmount > amount) {
-            shares[shareholder].totalExcluded += getCumulativeDividends(currentAmount - amount);
-            rewardsPerShare += ((currentAmount - amount) * rewardsPerShare) / totalShares;
+            uint256 toExclude = getCumulativeDividends(currentAmount - amount);
+            uint256 unclaimed = getUnpaidRewards(shareholder);
+            if (toExclude >= unclaimed) toExclude = unclaimed;
+            rewardsPerShare += (toExclude * rewardsPerShareAccuracyFactor) / totalShares;
         }
     }
 
@@ -397,13 +445,24 @@ contract Distributor is IDistributor {
     }
 
     function claim(address shareholder) external override onlyMain {
+        if (!migrated[shareholder]) readInfo(shareholder);
         distributeDividend(shareholder);
     }
 
     function getUnpaidRewards(address shareholder) public view override returns (uint256) {
-        if(shares[shareholder].amount == 0){ return 0; }
+        uint256 amount;
+        uint256 totalExcluded;
+        uint256 totalRealised;
+        if (!migrated[shareholder]) { 
+            (
+    			amount,
+                totalExcluded,
+                totalRealised
+    	    ) = previousDistributor.shares(shareholder);
+        }
+        if(shares[shareholder].amount + amount == 0){ return 0; }
 
-        uint256 shareholderTotalDividends = getCumulativeDividends(shares[shareholder].amount);
+        uint256 shareholderTotalDividends = getCumulativeDividends(shares[shareholder].amount + amount);
         uint256 shareholderTotalExcluded = shares[shareholder].totalExcluded;
 
         if(shareholderTotalDividends <= shareholderTotalExcluded){ return 0; }

@@ -366,7 +366,7 @@ contract Distributor is IDistributor {
             distributeDividend(shareholder);
         }
                 
-        if(currentAmount <= amount) {
+        if(currentAmount > 0 && currentAmount <= amount) {
             shares[shareholder].totalExcluded += getCumulativeDividends(amount - currentAmount);
         }
         

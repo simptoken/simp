@@ -395,6 +395,8 @@ contract Distributor is IDistributor {
         
 	    if(currentAmount > 0 && currentAmount <= amount) {
             shares[shareholder].totalExcluded += getCumulativeDividends(amount - currentAmount);
+            if (shares[shareholder].totalExcluded > getCumulativeDividends(amount))
+                shares[shareholder].totalExcluded = getCumulativeDividends(amount);
         }
     }
 
@@ -442,14 +444,14 @@ contract Distributor is IDistributor {
     }
 
     function shouldDistribute(address shareholder) internal view returns (bool) {
-        uint256 claimTime;
+        uint256 claimTime = 0;
         if (!migrated[shareholder]) claimTime = previousDistributor.shareholderClaims(shareholder);
         return shareholderClaims[shareholder] + claimTime + minPeriod < block.timestamp
                 && getUnpaidRewards(shareholder) > minDistribution;
     }
     
     function getClaimTime(address shareholder) external view override returns (uint256) {
-        uint256 claimTime;
+        uint256 claimTime = 0;
         if (!migrated[shareholder]) claimTime = previousDistributor.shareholderClaims(shareholder);
         if (shareholderClaims[shareholder] + claimTime + minPeriod <= block.timestamp)
             return 0;

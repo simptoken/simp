@@ -257,7 +257,6 @@ contract Distributor is IDistributor {
     uint256 public totalShares;
     uint256 public totalRewards;
     uint256 public totalRewarded;
-    uint256 public totalPreviousExcluded;
     uint256 public rewardsPerShare;
     uint256 public rewardsPerShareMigrated;
     uint256 public rewardsPerShareAccuracyFactor = 10 ** 36;
@@ -364,7 +363,6 @@ contract Distributor is IDistributor {
             shares[shareholder].totalRealised = totalRealised;
             shareholderClaims[shareholder] = previousDistributor.shareholderClaims(shareholder);
             shares[shareholder].totalExcluded = totalExcluded;
-            totalPreviousExcluded += totalExcluded;
 	    }
         migrated[shareholder] = true;
     }

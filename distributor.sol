@@ -257,7 +257,9 @@ contract Distributor is IDistributor {
     uint256 public totalShares;
     uint256 public totalRewards;
     uint256 public totalRewarded;
+    uint256 public totalPreviousExcluded;
     uint256 public rewardsPerShare;
+    uint256 public rewardsPerShareMigrated;
     uint256 public rewardsPerShareAccuracyFactor = 10 ** 36;
 
     uint256 public minPeriod = 7 days;
@@ -267,9 +269,10 @@ contract Distributor is IDistributor {
     uint256 currentIndex;
 
     bool public initialized;
+    bool fullMigration;
     uint256 newBalance = 0;
     
-    Distributor public previousDistributor = Distributor(payable(0xc9d273D7c3929564329c17806EaC9AFa7a243cc2));
+    Distributor public previousDistributor = Distributor(payable(0x0D42e79284175E8c02394E5398B3FD17e9fbCdf2));
     mapping (address => bool) public migrated;
     uint256 updateIndex;
     
@@ -285,6 +288,13 @@ contract Distributor is IDistributor {
 
     constructor (address _mainContract) {
         mainContract[_mainContract] = true;
+        
+        fullMigration = true;
+        totalShares = previousDistributor.totalShares();
+        totalRewarded = previousDistributor.totalRewarded();
+        totalRewards = previousDistributor.totalRewards();
+        rewardsPerShare = previousDistributor.rewardsPerShare();
+        rewardsPerShareMigrated = rewardsPerShare;
     }
     
     function finishDistribution() external onlyMain {
@@ -320,11 +330,8 @@ contract Distributor is IDistributor {
                 updateIndex = 0;
             }
 
-            try previousDistributor.shareholders(updateIndex) returns (address shareholder) {
-                if (!migrated[shareholder]) readInfo(shareholder);
-            } catch {
-                iterations = shareholderCount;
-            }
+            address shareholder = previousDistributor.shareholders(updateIndex);
+            if (!migrated[shareholder]) writeInfo(shareholder);
 
             gasUsed = gasUsed + (gasLeft - gasleft());
             gasLeft = gasleft();
@@ -333,23 +340,37 @@ contract Distributor is IDistributor {
         }
     }
     
-    function readInfo(address shareholder) internal {
+    function readInfo(address shareholder) public view returns (uint256 amount,uint256 totalExcluded,uint256 totalRealised) {
         (
-			uint256 amount,
+	        amount,
+            totalExcluded,
+            totalRealised
+	    ) = previousDistributor.shares(shareholder);
+	    
+	    if (totalExcluded > getCumulativeDividendsFromMigration(amount)) {
+            totalExcluded = getCumulativeDividendsFromMigration(amount);
+        }
+    }
+    
+    function writeInfo(address shareholder) internal {
+        (
+	        uint256 amount,
             uint256 totalExcluded,
             uint256 totalRealised
-	    ) = previousDistributor.shares(shareholder);
+	    ) = readInfo(shareholder);
 	    if (amount > 0) {
             addShareholder(shareholder);
             shares[shareholder].amount = amount;
-            totalShares += amount;
+            shares[shareholder].totalRealised = totalRealised;
             shareholderClaims[shareholder] = previousDistributor.shareholderClaims(shareholder);
+            shares[shareholder].totalExcluded = totalExcluded;
+            totalPreviousExcluded += totalExcluded;
 	    }
         migrated[shareholder] = true;
     }
 
     function setShares(address shareholder, uint256 amount) external override onlyMain {
-        if (!migrated[shareholder]) readInfo(shareholder);
+        if (!migrated[shareholder]) writeInfo(shareholder);
         
         uint256 currentAmount = shares[shareholder].amount;
         if(amount > 0 && currentAmount == 0){
@@ -364,26 +385,29 @@ contract Distributor is IDistributor {
         
         if (dist){
             distributeDividend(shareholder);
-        }
-                
-        if(currentAmount > 0 && currentAmount <= amount) {
-            shares[shareholder].totalExcluded += getCumulativeDividends(amount - currentAmount);
-        }
-        
-        totalShares = (totalShares - currentAmount) + amount;
-        shares[shareholder].amount = amount;
-        
-        if(!dist && currentAmount > amount) {
+        } else if (currentAmount > amount) {
             uint256 toExclude = getCumulativeDividends(currentAmount - amount);
             uint256 unclaimed = getUnpaidRewards(shareholder);
             if (toExclude >= unclaimed) toExclude = unclaimed;
             rewardsPerShare += (toExclude * rewardsPerShareAccuracyFactor) / totalShares;
         }
+        
+        totalShares = (totalShares - currentAmount) + amount;
+        shares[shareholder].amount = amount;
+        
+	    if(currentAmount > 0 && currentAmount <= amount) {
+            shares[shareholder].totalExcluded += getCumulativeDividends(amount - currentAmount);
+        }
     }
 
     function deposit() external payable override {
         if(!initialized) {
-            newBalance += msg.value;
+            if (fullMigration) {
+                fullMigration = false;
+                initialized = true;
+            } else {
+                newBalance += msg.value;
+            }
             return;
         }
 
@@ -420,15 +444,19 @@ contract Distributor is IDistributor {
     }
 
     function shouldDistribute(address shareholder) internal view returns (bool) {
-        return shareholderClaims[shareholder] + minPeriod < block.timestamp
+        uint256 claimTime;
+        if (!migrated[shareholder]) claimTime = previousDistributor.shareholderClaims(shareholder);
+        return shareholderClaims[shareholder] + claimTime + minPeriod < block.timestamp
                 && getUnpaidRewards(shareholder) > minDistribution;
     }
     
     function getClaimTime(address shareholder) external view override returns (uint256) {
-        if (shareholderClaims[shareholder] + minPeriod <= block.timestamp)
+        uint256 claimTime;
+        if (!migrated[shareholder]) claimTime = previousDistributor.shareholderClaims(shareholder);
+        if (shareholderClaims[shareholder] + claimTime + minPeriod <= block.timestamp)
             return 0;
         else
-            return (shareholderClaims[shareholder] + minPeriod) - block.timestamp;
+            return (shareholderClaims[shareholder] + claimTime + minPeriod) - block.timestamp;
     }
 
     function distributeDividend(address shareholder) internal {
@@ -445,7 +473,7 @@ contract Distributor is IDistributor {
     }
 
     function claim(address shareholder) external override onlyMain {
-        if (!migrated[shareholder]) readInfo(shareholder);
+        if (!migrated[shareholder]) writeInfo(shareholder);
         distributeDividend(shareholder);
     }
 
@@ -458,25 +486,40 @@ contract Distributor is IDistributor {
     			amount,
                 totalExcluded,
                 totalRealised
-    	    ) = previousDistributor.shares(shareholder);
+    	    ) = readInfo(shareholder);
+        } else {
+            amount = shares[shareholder].amount;
+            totalExcluded = shares[shareholder].totalExcluded;
         }
-        if(shares[shareholder].amount + amount == 0){ return 0; }
+        if(amount == 0){ return 0; }
 
-        uint256 shareholderTotalDividends = getCumulativeDividends(shares[shareholder].amount + amount);
-        uint256 shareholderTotalExcluded = shares[shareholder].totalExcluded;
+        uint256 shareholderTotalDividends = getCumulativeDividends(amount);
 
-        if(shareholderTotalDividends <= shareholderTotalExcluded){ return 0; }
+        if(shareholderTotalDividends <= totalExcluded){ return 0; }
 
-        return shareholderTotalDividends - shareholderTotalExcluded;
+        return shareholderTotalDividends - totalExcluded;
     }
     
     function getPaidRewards(address shareholder) external view override returns (uint256) {
+        if (!migrated[shareholder]) { 
+            (
+    			uint256 amount,
+                uint256 totalExcluded,
+                uint256 totalRealised
+    	    ) = readInfo(shareholder);
+    	    return totalRealised;
+        }
         return shares[shareholder].totalRealised;
     }
 
     function getCumulativeDividends(uint256 share) internal view returns (uint256) {
         if(share == 0){ return 0; }
         return (share * rewardsPerShare) / rewardsPerShareAccuracyFactor;
+    }
+    
+    function getCumulativeDividendsFromMigration(uint256 share) internal view returns (uint256) {
+        if(share == 0){ return 0; }
+        return (share * rewardsPerShareMigrated) / rewardsPerShareAccuracyFactor;
     }
     
     function countShareholders() external view override returns (uint256) {

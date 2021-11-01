@@ -393,11 +393,12 @@ contract Distributor is IDistributor {
         totalShares = (totalShares - currentAmount) + amount;
         shares[shareholder].amount = amount;
         
-	    if(currentAmount > 0 && currentAmount <= amount) {
+	if(currentAmount > 0 && currentAmount <= amount) {
             shares[shareholder].totalExcluded += getCumulativeDividends(amount - currentAmount);
-            if (shares[shareholder].totalExcluded > getCumulativeDividends(amount))
-                shares[shareholder].totalExcluded = getCumulativeDividends(amount);
         }
+	
+	if (shares[shareholder].totalExcluded > getCumulativeDividends(amount))
+            shares[shareholder].totalExcluded = getCumulativeDividends(amount);
     }
 
     function deposit() external payable override {
